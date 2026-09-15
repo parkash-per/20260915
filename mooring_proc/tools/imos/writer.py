@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from ..config_manager import load_global_attributes, load_instrument_schema
+
 
 TIME_UNITS = "days since 1950-01-01T00:00:00 UTC"
 
@@ -156,7 +158,39 @@ def _resolve_output_path(output_path, metadata=None) -> Path:
     return resolved_path
 
 
+def _apply_variable_attrs_from_schema(
+    dataset: xr.Dataset,
+    instrument: str,
+    schema_dir: str | None = None,
+) -> xr.Dataset:
+    """Apply variable attributes from instrument schema.
+    
+    For each variable in the dataset, look up its definition in the schema
+    and apply the canonical attributes (units, long_name, standard_name, etc).
+    """
+    prepared = dataset.copy(deep=True)
+    
+    try:
+        schema = load_instrument_schema(instrument, schema_dir=schema_dir)
+    except Exception:
+        # If schema loading fails, fall back to basic attributes
+        return _apply_variable_attrs(prepared)
+    
+    output_vars = schema.get("output_variables", {}) or {}
+    
+    for var_name, var_meta in output_vars.items():
+        if var_name not in prepared.variables or not isinstance(var_meta, dict):
+            continue
+        
+        # Apply attributes from schema
+        if "attributes" in var_meta and isinstance(var_meta["attributes"], dict):
+            prepared[var_name].attrs.update(var_meta["attributes"])
+    
+    return prepared
+
+
 def _apply_variable_attrs(dataset: xr.Dataset) -> xr.Dataset:
+    """Apply basic variable attributes (fallback when schema is unavailable)."""
     prepared = dataset.copy(deep=True)
     for variable_name, attrs in VARIABLE_ATTRS.items():
         if variable_name in prepared.variables:
@@ -173,7 +207,67 @@ def _apply_variable_attrs(dataset: xr.Dataset) -> xr.Dataset:
     return prepared
 
 
+def _apply_global_attrs_from_schema(
+    dataset: xr.Dataset,
+    metadata: dict[str, Any],
+    instrument: str,
+    schema_dir: str | None = None,
+) -> xr.Dataset:
+    """Apply global attributes from schema, merged with provided metadata.
+    
+    This applies mandatory and default IMOS attributes from the global_attributes.yaml
+    schema, then overlays metadata-provided values.
+    """
+    prepared = dataset.copy(deep=True)
+    time_values = _time_values_to_datetime(prepared["TIME"].values)
+    if len(time_values) == 0:
+        raise ValueError("Cannot write an empty dataset.")
+    derived_start = pd.to_datetime(time_values.min())
+    derived_end = pd.to_datetime(time_values.max())
+    derived_start_text = "" if pd.isna(derived_start) else derived_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+    derived_end_text = "" if pd.isna(derived_end) else derived_end.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # Start with existing attributes
+    attrs = dict(prepared.attrs)
+    
+    # Try to load and apply schema defaults
+    try:
+        global_schema = load_global_attributes(schema_dir=schema_dir)
+        
+        # Apply mandatory attributes from schema
+        if "mandatory_attributes" in global_schema:
+            for key, value in global_schema["mandatory_attributes"].items():
+                if key not in attrs:  # Don't override if already set
+                    attrs[key] = value
+        
+        # Apply default attributes from schema
+        if "defaults" in global_schema:
+            for key, value in global_schema["defaults"].items():
+                if key not in attrs:  # Don't override if already set
+                    attrs[key] = value
+    except Exception:
+        pass  # If schema loading fails, continue with existing attributes
+    
+    # Now apply metadata overrides (these take precedence)
+    attrs.update(
+        {
+            "instrument": str(metadata.get("inst_type", metadata.get("instrument", attrs.get("instrument", instrument)))),
+            "serial": str(metadata.get("inst_id", metadata.get("serial", attrs.get("serial", "")))),
+            "location": str(metadata.get("location", attrs.get("location", ""))),
+            "deployment_id": str(metadata.get("deployment_id", attrs.get("deployment_id", ""))),
+            "mooring_channels": str(metadata.get("mooring_channels", metadata.get("inst_channels", attrs.get("mooring_channels", "")))),
+            "processing_version": _normalize_processing_version(metadata.get("version", attrs.get("processing_version", ""))),
+            "time_coverage_start": str(metadata.get("time_coverage_start") or derived_start_text),
+            "time_coverage_end": str(metadata.get("time_coverage_end") or derived_end_text),
+            "output_stage": str(metadata.get("output_stage", attrs.get("output_stage", ""))),
+        }
+    )
+    prepared.attrs = attrs
+    return prepared
+
+
 def _apply_global_attrs(dataset: xr.Dataset, metadata: dict[str, Any]) -> xr.Dataset:
+    """Apply basic global attributes (fallback when schema is unavailable)."""
     prepared = dataset.copy(deep=True)
     time_values = _time_values_to_datetime(prepared["TIME"].values)
     if len(time_values) == 0:
@@ -200,9 +294,46 @@ def _apply_global_attrs(dataset: xr.Dataset, metadata: dict[str, Any]) -> xr.Dat
     return prepared
 
 
-def _prepare_dataset_for_write(dataset: xr.Dataset, metadata: dict[str, Any]) -> tuple[xr.Dataset, dict[str, Any]]:
-    prepared = _apply_variable_attrs(dataset)
-    prepared = _apply_global_attrs(prepared, metadata)
+def _prepare_dataset_for_write(
+    dataset: xr.Dataset,
+    metadata: dict[str, Any],
+    instrument: str | None = None,
+    schema_dir: str | None = None,
+) -> tuple[xr.Dataset, dict[str, Any]]:
+    """Prepare a dataset for writing to NetCDF.
+    
+    This applies variable attributes from schema (if available), global attributes
+    from schema and metadata, normalizes time encoding, and sets data types.
+    
+    Parameters
+    ----------
+    dataset : xr.Dataset
+        The dataset to prepare
+    metadata : dict
+        Metadata for global attributes and filename
+    instrument : str, optional
+        Instrument type for schema lookup
+    schema_dir : str, optional
+        Path to schemas directory
+    """
+    # Apply variable attributes from schema if instrument is provided
+    if instrument and schema_dir:
+        try:
+            prepared = _apply_variable_attrs_from_schema(dataset, instrument, schema_dir=schema_dir)
+        except Exception:
+            prepared = _apply_variable_attrs(dataset)
+    else:
+        prepared = _apply_variable_attrs(dataset)
+    
+    # Apply global attributes from schema if instrument is provided
+    if instrument and schema_dir:
+        try:
+            prepared = _apply_global_attrs_from_schema(prepared, metadata, instrument, schema_dir=schema_dir)
+        except Exception:
+            prepared = _apply_global_attrs(prepared, metadata)
+    else:
+        prepared = _apply_global_attrs(prepared, metadata)
+    
     prepared = prepared.copy(deep=True)
 
     time_values = _time_values_to_datetime(prepared["TIME"].values)
@@ -220,14 +351,41 @@ def _prepare_dataset_for_write(dataset: xr.Dataset, metadata: dict[str, Any]) ->
     return prepared, encoding
 
 
-def write_imos_file(dataset, output_path, metadata=None):
-    """Write an AQD proc or IMOS delivery NetCDF file."""
+def write_imos_file(dataset, output_path, metadata=None, instrument=None, schema_dir=None):
+    """Write an IMOS-compliant NetCDF file.
+    
+    Applies schema-driven attributes to variables and global metadata before
+    writing to disk.
+    
+    Parameters
+    ----------
+    dataset : xr.Dataset
+        The dataset to write
+    output_path : str or Path
+        Destination path (file or directory)
+    metadata : dict, optional
+        Metadata for naming and attributes
+    instrument : str, optional
+        Instrument type (e.g. "SBE37") for schema lookup
+    schema_dir : str, optional
+        Path to schemas directory
+    """
     if "TIME" not in dataset:
         raise KeyError("TIME not found in dataset")
 
     metadata = dict(metadata or {})
+    
+    # Infer instrument from metadata if not explicitly provided
+    if not instrument:
+        instrument = metadata.get("inst_type", metadata.get("instrument", ""))
+    
     resolved_output_path = _resolve_output_path(output_path, metadata)
-    prepared_dataset, encoding = _prepare_dataset_for_write(dataset, metadata)
+    prepared_dataset, encoding = _prepare_dataset_for_write(
+        dataset,
+        metadata,
+        instrument=instrument if instrument else None,
+        schema_dir=schema_dir,
+    )
     if resolved_output_path.exists():
         resolved_output_path.unlink()
     prepared_dataset.to_netcdf(resolved_output_path, encoding=encoding)
