@@ -140,8 +140,8 @@ def run_proc2(config, instrument_id=None, schema_dir=None):
     
     proc_2 loads the proc_1 FV00 file from disk, reconstructs any missing
     *_quality_control variables, applies manual QC flags, and writes the final
-    IMOS FV01 output. This is the only product that will be compliance-checked
-    and published as a deliverable.
+    IMOS FV01 output with schema-driven attributes. This is the only product
+    that will be compliance-checked and published as a deliverable.
     
     Parameters
     ----------
@@ -198,7 +198,15 @@ def run_proc2(config, instrument_id=None, schema_dir=None):
 
     proc_2_dir = _stage_dir(row.get("proc_2_path"))
     output_path = proc_2_dir / build_output_filename(stage_metadata)
-    proc_2_output = write_imos_file(proc_2_dataset, output_path, metadata=stage_metadata)
+    
+    # Write proc_2 FV01 file with schema-driven attributes
+    proc_2_output = write_imos_file(
+        proc_2_dataset,
+        output_path,
+        metadata=stage_metadata,
+        instrument=inst_type,
+        schema_dir=schema_dir,
+    )
     manual_qc_log = write_manual_qc_flags_txt(manual_qc_flags, proc_2_output)
     update_metadata_file_fields(metadata_source, inst_deploy_id, {"proc_2_file": Path(proc_2_output).name})
     return {
