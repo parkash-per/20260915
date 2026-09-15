@@ -174,7 +174,15 @@ def run_proc1(config, instrument_id=None, source_path=None):
         errors="ignore"
     )
 
-    proc_1_output = write_imos_file(proc_1_dataset, output_path, metadata=stage_metadata)
+    # Write proc_1 FV00 file with schema-driven attributes
+    schema_dir = config.get("schema_dir")
+    proc_1_output = write_imos_file(
+        proc_1_dataset,
+        output_path,
+        metadata=stage_metadata,
+        instrument=inst_type,
+        schema_dir=schema_dir,
+    )
     update_metadata_file_fields(metadata_source, inst_deploy_id, {"proc_1_file": Path(proc_1_output).name})
     return {
         "metadata_row": row,
