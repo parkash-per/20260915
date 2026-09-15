@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import xarray as xr
 
+from ..config_manager import load_instrument_schema
 from ..database_lookup import get_instrument_context, update_metadata_file_fields
 from ..imos.writer import build_output_filename, write_imos_file
 from ..qc.manual_flags import apply_qc_flag_windows, write_manual_qc_flags_txt
@@ -59,26 +61,97 @@ def _resolve_stage_file(stage_dir: Path, configured_name: Any) -> Path:
     return candidates[-1]
 
 
-def _load_dataset(input_dataset, row) -> xr.Dataset:
-    if isinstance(input_dataset, xr.Dataset):
-        return input_dataset.copy(deep=True)
-
-    if input_dataset is not None:
-        dataset_path = Path(str(input_dataset)).expanduser()
-        if not dataset_path.is_absolute():
-            dataset_path = (Path.cwd() / dataset_path).resolve()
-        else:
-            dataset_path = dataset_path.resolve()
-    else:
-        stage_dir = _stage_dir(row.get("proc_1_path"))
-        dataset_path = _resolve_stage_file(stage_dir, row.get("proc_1_file"))
-
+def _load_proc1_file(row) -> xr.Dataset:
+    """Load the proc_1 FV00 file from disk.
+    
+    The proc_1 file is always read from the proc_1_path directory,
+    either using the configured proc_1_file name or the latest *.nc file.
+    """
+    stage_dir = _stage_dir(row.get("proc_1_path"))
+    dataset_path = _resolve_stage_file(stage_dir, row.get("proc_1_file"))
     with xr.open_dataset(dataset_path) as opened_dataset:
         return opened_dataset.load()
 
 
-def run_proc2(config, instrument_id=None, input_dataset=None):
-    """Run proc_2 workflow without re-trimming proc_1 data."""
+def _reconstruct_missing_qc_variables(
+    dataset: xr.Dataset,
+    instrument: str,
+    schema_dir: str | None = None,
+    default_flag: int = 1,
+) -> xr.Dataset:
+    """Reconstruct missing *_quality_control variables in a dataset.
+    
+    For each variable in the dataset, if the corresponding *_quality_control
+    variable is missing, create it with the given default flag value.
+    
+    Parameters
+    ----------
+    dataset : xr.Dataset
+        The dataset to augment (typically a loaded proc_1 FV00 file)
+    instrument : str
+        Instrument type (e.g. "SBE37") to look up schema
+    schema_dir : str, optional
+        Path to schemas directory; defaults to tools/schemas
+    default_flag : int, default 1
+        Default QC flag value to use when creating new QC variables.
+        1 = Good_data in IMOS convention.
+    
+    Returns
+    -------
+    xr.Dataset
+        New dataset with missing QC variables added.
+    """
+    schema = load_instrument_schema(instrument, schema_dir=schema_dir)
+    output_vars = schema.get("output_variables", {}) or {}
+    
+    result = dataset.copy(deep=True)
+    
+    for var_name, var_meta in output_vars.items():
+        if not var_name.endswith("_quality_control") or not isinstance(var_meta, dict):
+            continue
+        
+        if var_name in result.variables:
+            continue
+        
+        # Extract the base variable name (e.g. TEMP from TEMP_quality_control)
+        base_var_name = var_name.removesuffix("_quality_control")
+        
+        # Only create QC variable if the base variable exists
+        if base_var_name not in result.variables:
+            continue
+        
+        # Get dimensions from the base variable
+        base_var = result[base_var_name]
+        dims = list(base_var.dims)
+        
+        # Create the QC variable filled with the default flag value
+        qc_data = np.full(base_var.shape, fill_value=default_flag, dtype=np.int8)
+        result[var_name] = xr.DataArray(qc_data, dims=dims)
+        
+        # Apply schema attributes if available
+        if "attributes" in var_meta and isinstance(var_meta["attributes"], dict):
+            result[var_name].attrs.update(var_meta["attributes"])
+    
+    return result
+
+
+def run_proc2(config, instrument_id=None, schema_dir=None):
+    """Run proc_2 workflow to produce final IMOS FV01 product with QC variables.
+    
+    proc_2 loads the proc_1 FV00 file from disk, reconstructs any missing
+    *_quality_control variables, applies manual QC flags, and writes the final
+    IMOS FV01 output. This is the only product that will be compliance-checked
+    and published as a deliverable.
+    
+    Parameters
+    ----------
+    config : dict
+        Configuration dict including manual_qc_flags or flag_windows
+    instrument_id : str, optional
+        Instrument deployment ID; resolved from config if not provided
+    schema_dir : str, optional
+        Path to schemas directory; resolved from config if not provided
+    """
     metadata_source = _metadata_source(config)
     inst_deploy_id = _instrument_key(config, instrument_id)
     _, row, cfg, _ = get_instrument_context(
@@ -87,10 +160,22 @@ def run_proc2(config, instrument_id=None, input_dataset=None):
         deployment_id=config.get("deployment_id"),
     )
     inst_type = _instrument_type(row)
+    schema_dir = schema_dir or config.get("schema_dir")
 
-    proc_1_dataset = _load_dataset(input_dataset, row)
+    # Load proc_1 FV00 file from disk
+    proc_1_dataset = _load_proc1_file(row)
+    
+    # Reconstruct any missing QC variables from schema
+    proc_1_with_qc = _reconstruct_missing_qc_variables(
+        proc_1_dataset,
+        inst_type,
+        schema_dir=schema_dir,
+        default_flag=1,
+    )
+    
+    # Apply manual QC flags
     manual_qc_flags = list(config.get("manual_qc_flags", config.get("flag_windows", [])) or [])
-    proc_2_dataset = apply_qc_flag_windows(proc_1_dataset, manual_qc_flags)
+    proc_2_dataset = apply_qc_flag_windows(proc_1_with_qc, manual_qc_flags)
 
     stage_metadata = {**cfg, **row.to_dict(), **config, **proc_2_dataset.attrs}
     stage_metadata.update(
