@@ -103,7 +103,12 @@ def _select_dataset(parsed: dict[str, Any], config: dict[str, Any]):
 
 
 def run_proc1(config, instrument_id=None, source_path=None):
-    """Run proc_1 for AQD, SBE26, SBE37, RBRQ, or SIG500."""
+    """Run proc_1 for AQD, SBE26, SBE37, RBRQ, or SIG500.
+    
+    Produces IMOS FV00 output. Quality control variables are excluded
+    from the final FV00 output; they are only used for internal QC window
+    tracking and flagging during the trimming process.
+    """
     metadata_source = _metadata_source(config)
     inst_deploy_id = _instrument_key(config, instrument_id)
     _, row, cfg, _ = get_instrument_context(
@@ -162,7 +167,14 @@ def run_proc1(config, instrument_id=None, source_path=None):
     if inst_type == "AQD":
         _plot_review(trimmed_dataset, post_plot_path, "AQD proc_1 post-trim review", start_time, end_time)
 
-    proc_1_output = write_imos_file(trimmed_dataset, output_path, metadata=stage_metadata)
+    # Drop quality_control variables from FV00 output
+    # These are only used for internal QC tracking; proc_2 will handle final quality flags
+    proc_1_dataset = trimmed_dataset.drop_vars(
+        [name for name in trimmed_dataset.data_vars if name.endswith("_quality_control")],
+        errors="ignore"
+    )
+
+    proc_1_output = write_imos_file(proc_1_dataset, output_path, metadata=stage_metadata)
     update_metadata_file_fields(metadata_source, inst_deploy_id, {"proc_1_file": Path(proc_1_output).name})
     return {
         "metadata_row": row,
