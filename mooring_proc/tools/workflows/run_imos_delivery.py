@@ -9,6 +9,7 @@ import xarray as xr
 
 from ..config_manager import load_global_attributes
 from ..database_lookup import get_instrument_context, update_metadata_file_fields
+from ..imos.attributes import apply_imos_mandatory_attributes, get_attribute_overrides
 from ..imos.postprocess import apply_postprocess
 from ..imos.publisher import publish_delivery
 from ..validation.compliance_check import run_compliance_check
@@ -41,35 +42,37 @@ def _instrument_type(row: Any) -> str:
 
 
 def _stage_dir(path_value: Any) -> Path:
-    path = Path(str(path_value)).expanduser()
-    if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
-    else:
-        path = path.resolve()
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return Path(str(path_value or "")).expanduser().resolve()
 
 
 def _resolve_stage_file(stage_dir: Path, configured_name: Any, *, required: bool = True) -> Path | None:
-    if configured_name is not None and str(configured_name).strip():
-        candidate = stage_dir / str(configured_name).strip()
-        if candidate.exists():
-            return candidate
-    candidates = sorted(stage_dir.glob("*.nc"))
-    if not candidates and required:
-        raise FileNotFoundError(f"No NetCDF files found in {stage_dir}")
-    if not candidates:
-        return None
-    return candidates[-1]
-
-
-def _delivery_attr_overrides(config: dict[str, Any], inst_type: str) -> dict[str, Any]:
-    overrides = dict(config.get("delivery_global_attrs", {}) or {})
-    by_inst = config.get("delivery_global_attrs_by_instrument", {}) or {}
-    inst_overrides = by_inst.get(inst_type, by_inst.get(inst_type.lower(), {}))
-    if isinstance(inst_overrides, dict):
-        overrides.update(inst_overrides)
-    return overrides
+    """Resolve a stage file (proc_1, proc_2, etc.) from a directory.
+    
+    Parameters
+    ----------
+    stage_dir : Path
+        The directory to search
+    configured_name : Any
+        The configured filename (or None)
+    required : bool
+        If True, raise error if file not found. If False, return None.
+    
+    Returns
+    -------
+    Path | None
+        Path to the file if found, or None if not required and not found.
+    """
+    if configured_name is None:
+        candidate = None
+    else:
+        candidate = stage_dir / str(configured_name)
+    
+    if candidate and candidate.exists():
+        return candidate
+    
+    if required:
+        raise FileNotFoundError(f"Stage file not found in {stage_dir}: {configured_name}")
+    return None
 
 
 # Attributes that are workflow-internal and must be removed before delivery
@@ -123,6 +126,7 @@ def _get_imos_compliant_attributes(schema_dir: str | None = None) -> set[str]:
         "title",
         "abstract",
         "keywords",
+        "standard_name_vocabulary",
     })
     
     return allowed
@@ -211,10 +215,11 @@ def run_imos_delivery(config, instrument_id=None, input_dataset=None):
     
     This is the final step before publication. It:
     1. Loads the proc_2 FV01 file
-    2. Removes all intermediate-only attributes
-    3. Runs compliance checks
-    4. If valid, publishes to the IMOS deliverables directory
-    5. Updates metadata tracking
+    2. Applies mandatory IMOS global attributes from schema
+    3. Removes all intermediate-only attributes
+    4. Runs compliance checks
+    5. If valid, publishes to the IMOS deliverables directory
+    6. Updates metadata tracking
     
     Only the final FV01 product is published; proc_1 FV00 is not delivered.
     
@@ -255,12 +260,19 @@ def run_imos_delivery(config, instrument_id=None, input_dataset=None):
         final_dataset_path = proc_2_path
 
     delivery_dir = _stage_dir(row.get("imos_deliverables_path", row.get("imos_path", "")))
-    attr_overrides = _delivery_attr_overrides(config, inst_type)
+    attr_overrides = get_attribute_overrides(config, inst_type=inst_type, schema_dir=config.get("schema_dir"))
     schema_dir = config.get("schema_dir")
 
-    # Load proc_2 FV01 file and apply any delivery-specific overrides
+    # Load proc_2 FV01 file and apply delivery-specific overrides
     with xr.open_dataset(final_dataset_path) as ds_final:
         proc_2_ds = apply_postprocess(ds_final.load(), global_attr_overrides=attr_overrides)
+
+    # Apply mandatory IMOS global attributes from schema
+    proc_2_ds = apply_imos_mandatory_attributes(
+        proc_2_ds,
+        overrides=attr_overrides,
+        schema_dir=schema_dir,
+    )
 
     # Sanitize: remove all intermediate-only attributes before validation
     final_dataset_for_validation = _sanitise_delivery_dataset(proc_2_ds, schema_dir=schema_dir)
