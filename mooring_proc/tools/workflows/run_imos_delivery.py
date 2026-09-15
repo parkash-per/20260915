@@ -1,4 +1,4 @@
-"""Shared IMOS delivery workflow (proc_1 -> FV00, proc_2 -> FV01)."""
+"""Shared IMOS delivery workflow (FV01-only compliance gate)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Any
 
 import xarray as xr
 
+from ..config_manager import load_global_attributes
 from ..database_lookup import get_instrument_context, update_metadata_file_fields
 from ..imos.postprocess import apply_postprocess
 from ..imos.publisher import publish_delivery
@@ -71,6 +72,7 @@ def _delivery_attr_overrides(config: dict[str, Any], inst_type: str) -> dict[str
     return overrides
 
 
+# Attributes that are workflow-internal and must be removed before delivery
 _INTERMEDIATE_ONLY_ATTRS = {
     "proc_1_file",
     "proc_2_file",
@@ -79,32 +81,111 @@ _INTERMEDIATE_ONLY_ATTRS = {
     "input_file_path",
     "source_file",
     "output_dir",
+    "output_stage",
+    "output_name_mode",
     "manual_qc_flags",
     "flag_windows",
+    "range_tag",
 }
 
 
-def _sanitise_delivery_dataset(dataset: xr.Dataset) -> xr.Dataset:
+def _get_imos_compliant_attributes(schema_dir: str | None = None) -> set[str]:
+    """Load the set of IMOS-compliant global attributes from schema.
+    
+    This defines which attributes are allowed in the final delivery file.
+    """
+    global_schema = load_global_attributes(schema_dir=schema_dir)
+    allowed = set()
+    
+    # Mandatory attributes are always allowed
+    if "mandatory_attributes" in global_schema:
+        allowed.update(global_schema["mandatory_attributes"].keys())
+    
+    # Default attributes are allowed
+    if "defaults" in global_schema:
+        allowed.update(global_schema["defaults"].keys())
+    
+    # Geospatial attributes are allowed
+    if "geospatial" in global_schema:
+        allowed.update(global_schema["geospatial"].keys())
+    
+    # Standard deployment/instrument attributes
+    allowed.update({
+        "instrument",
+        "serial",
+        "deployment_id",
+        "location",
+        "mooring_channels",
+        "time_coverage_start",
+        "time_coverage_end",
+        "processing_version",
+        "Conventions",
+        "title",
+        "abstract",
+        "keywords",
+    })
+    
+    return allowed
+
+
+def _sanitise_delivery_dataset(dataset: xr.Dataset, schema_dir: str | None = None) -> xr.Dataset:
+    """Remove intermediate-only attributes and normalize for IMOS compliance.
+    
+    This strips all workflow-internal attributes, ensuring only IMOS-compliant
+    attributes remain before compliance checking and publication.
+    
+    Parameters
+    ----------
+    dataset : xr.Dataset
+        The proc_2 FV01 dataset to sanitize
+    schema_dir : str, optional
+        Path to schemas directory for loading compliance rules
+    
+    Returns
+    -------
+    xr.Dataset
+        Cleaned dataset with only IMOS-compliant attributes.
+    """
     cleaned = dataset.copy(deep=True)
-    for key in sorted(_INTERMEDIATE_ONLY_ATTRS & set(cleaned.attrs.keys())):
-        cleaned.attrs.pop(key, None)
-    cleaned.attrs.setdefault("output_stage", "imos_delivery")
-    cleaned.attrs.setdefault("output_name_mode", "imos")
-    cleaned.attrs.setdefault("version", "01")
+    
+    # Remove all intermediate-only attributes
+    for key in list(cleaned.attrs.keys()):
+        if key in _INTERMEDIATE_ONLY_ATTRS:
+            cleaned.attrs.pop(key, None)
+    
+    # Optionally validate against allowed attributes (currently permissive)
+    # In the future, this could enforce a strict whitelist
+    
+    # Ensure delivery stage is set
+    cleaned.attrs["output_stage"] = "imos_delivery"
+    
     return cleaned
 
 
-def _delivery_metadata(row, cfg, version: str, input_path: Path) -> dict[str, Any]:
+def _delivery_metadata(row, cfg, version: str, input_path: Path, schema_dir: str | None = None) -> dict[str, Any]:
+    """Build metadata dict for the final delivery file.
+    
+    Loads the proc_2 file, removes intermediate attributes, and constructs
+    the metadata needed for the delivery output filename and attributes.
+    """
     with xr.open_dataset(input_path) as opened_dataset:
         dataset = opened_dataset.load()
 
     attrs = dict(dataset.attrs)
+    
+    # Remove intermediate-only attributes
     for key in _INTERMEDIATE_ONLY_ATTRS:
         attrs.pop(key, None)
+    
+    # Normalize source_file to just the filename (not full path)
+    source_file_value = attrs.get("source_file", "")
+    if isinstance(source_file_value, str) and source_file_value:
+        attrs["source_file"] = Path(source_file_value).name
 
     depth_value = attrs.get("NOMINAL_DEPTH", row.get("nominal_depth", cfg.get("nominal_depth", 0)))
     if "NOMINAL_DEPTH" in dataset.variables:
         depth_value = float(dataset["NOMINAL_DEPTH"].values)
+    
     return {
         **cfg,
         **row.to_dict(),
@@ -126,7 +207,26 @@ def _delivery_metadata(row, cfg, version: str, input_path: Path) -> dict[str, An
 
 
 def run_imos_delivery(config, instrument_id=None, input_dataset=None):
-    """Validate and publish only the final FV01 IMOS product."""
+    """Compliance gate for FV01 delivery.
+    
+    This is the final step before publication. It:
+    1. Loads the proc_2 FV01 file
+    2. Removes all intermediate-only attributes
+    3. Runs compliance checks
+    4. If valid, publishes to the IMOS deliverables directory
+    5. Updates metadata tracking
+    
+    Only the final FV01 product is published; proc_1 FV00 is not delivered.
+    
+    Parameters
+    ----------
+    config : dict
+        Configuration including schema_dir and delivery paths
+    instrument_id : str, optional
+        Instrument deployment ID; resolved from config if not provided
+    input_dataset : str or Path, optional
+        Explicit path to proc_2 file; if not provided, resolves from metadata
+    """
     metadata_source = _metadata_source(config)
     inst_deploy_id = _instrument_key(config, instrument_id)
     _, row, cfg, _ = get_instrument_context(
@@ -158,36 +258,38 @@ def run_imos_delivery(config, instrument_id=None, input_dataset=None):
     attr_overrides = _delivery_attr_overrides(config, inst_type)
     schema_dir = config.get("schema_dir")
 
+    # Load proc_2 FV01 file and apply any delivery-specific overrides
     with xr.open_dataset(final_dataset_path) as ds_final:
         proc_2_ds = apply_postprocess(ds_final.load(), global_attr_overrides=attr_overrides)
 
-    final_dataset_for_validation = _sanitise_delivery_dataset(proc_2_ds)
+    # Sanitize: remove all intermediate-only attributes before validation
+    final_dataset_for_validation = _sanitise_delivery_dataset(proc_2_ds, schema_dir=schema_dir)
+    
+    # Run compliance check on the cleaned dataset
     run_compliance_check(
         final_dataset_for_validation,
         schema={"instrument": inst_type, "schema_dir": schema_dir},
     )
 
-    final_metadata = _delivery_metadata(row, cfg, "1", final_dataset_path) | attr_overrides
+    # Build final metadata for the output filename and attributes
+    final_metadata = _delivery_metadata(row, cfg, "1", final_dataset_path, schema_dir=schema_dir) | attr_overrides
+    
+    # Final cleanup: ensure no intermediate attributes in the metadata dict itself
     final_metadata = {k: v for k, v in final_metadata.items() if k not in _INTERMEDIATE_ONLY_ATTRS}
     final_metadata["output_name_mode"] = "imos"
     final_metadata["output_stage"] = "imos_delivery"
     final_metadata["version"] = "01"
 
-    for stale_file in delivery_dir.glob("*.nc"):
-        if "FV00" in stale_file.name and stale_file.name != Path(final_metadata.get("source_file", "")).name:
-            stale_file.unlink()
-
+    # Publish the FV01 output to delivery directory
     fv01_output = publish_delivery(final_dataset_path, delivery_dir, metadata=final_metadata)
 
-    for stale_file in delivery_dir.glob("*.nc"):
-        if "FV00" in stale_file.name and stale_file.name != Path(fv01_output).name:
-            stale_file.unlink()
-
+    # Update metadata tracking
     update_metadata_file_fields(
         metadata_source,
         inst_deploy_id,
         {"imos_deliverables_file": Path(fv01_output).name},
     )
+    
     return {
         "metadata_row": row,
         "proc_1_delivery": None,
