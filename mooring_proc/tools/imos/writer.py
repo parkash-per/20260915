@@ -93,13 +93,13 @@ GLOBAL_ATTR_TYPE_MAP: dict[str, str] = {
 VAR_ATTR_TYPE_MAP: dict[str, str] = {
     "flag_values": "str",
     "flag_meanings": "str",
-    "valid_min": "typed-token",
-    "valid_max": "typed-token",
-    "uncertainty": "typed-token",
-    "time_uncertainty": "typed-token",
-    "_FillValue": "typed-token",
-    "missing_value": "typed-token",
-    "applied_offset": "typed-token",
+    "valid_min": "f32",
+    "valid_max": "f32",
+    "uncertainty": "f32",
+    "time_uncertainty": "f32",
+    "_FillValue": "f32",
+    "missing_value": "f32",
+    "applied_offset": "f32",
 }
 
 _TOKEN_PATTERN = re.compile(r"^\s*([+-]?(?:\d+\.\d*|\d*\.\d+|\d+)(?:[eE][+-]?\d+)?)\s*([fFbB])?\s*$")
@@ -271,6 +271,27 @@ def _coerce_var_attr_value(attr_name: str, value: Any) -> Any:
         if isinstance(value, (list, tuple, np.ndarray)):
             return np.asarray([_parse_typed_token(v) for v in value])
         return _parse_typed_token(value)
+
+    if cast_type in {"f32", "f64", "i1", "i2", "i4"}:
+        def _cast_scalar(v: Any) -> Any:
+            if cast_type == "f32":
+                return np.float32(float(v))
+            if cast_type == "f64":
+                return np.float64(float(v))
+            if cast_type == "i1":
+                return np.int8(int(float(v)))
+            if cast_type == "i2":
+                return np.int16(int(float(v)))
+            if cast_type == "i4":
+                return np.int32(int(float(v)))
+            return v
+
+        try:
+            if isinstance(value, (list, tuple, np.ndarray)):
+                return np.asarray([_cast_scalar(v) for v in value])
+            return _cast_scalar(value)
+        except (TypeError, ValueError):
+            return value
 
     return value
 
