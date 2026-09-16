@@ -74,6 +74,7 @@ class ImosMetadataTests(unittest.TestCase):
                 },
                 instrument="SBE37",
             )
+            self.assertEqual(Path(written).parent, Path(tmpdir))
 
             with xr.open_dataset(written) as opened:
                 attrs = dict(opened.attrs)
@@ -96,6 +97,7 @@ class ImosMetadataTests(unittest.TestCase):
     def test_publish_delivery_uses_clean_dataset_and_consistent_filename(self):
         dataset = _sample_dataset()
         dataset.attrs["output_stage"] = "imos_delivery"
+        written_path = None
 
         with tempfile.TemporaryDirectory() as tmpdir:
             written = publish_delivery(
@@ -117,10 +119,15 @@ class ImosMetadataTests(unittest.TestCase):
                 },
                 instrument="SBE37",
             )
+            written_path = Path(written)
+            self.assertEqual(written_path.parent, Path(tmpdir))
 
-            output_name = Path(written).name
+            output_name = written_path.name
             with xr.open_dataset(written) as opened:
                 attrs = dict(opened.attrs)
+
+        self.assertIsNotNone(written_path)
+        self.assertFalse(written_path.exists())
 
         self.assertIn("_PTSUV_", output_name)
         self.assertNotIn("_TCS_", output_name)
