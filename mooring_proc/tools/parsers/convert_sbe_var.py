@@ -89,11 +89,23 @@ def convert_sbe_var(
         return "TEMP_2", data, ""
 
     # ---- Conductivity -----------------------------------------------------
-    if name in ("c0S0x2Fm", "cond0S0x2Fm"):
+    if name in (
+        "c0S0x2Fm", "cond0S0x2Fm",
+        "conductivity", "cond", "cndc",
+        "cond_s_m", "conductivity_s_m", "cond_sm", "conductivity_sm",
+    ):
         return "CNDC", data, ""
-    if name in ("c0ms0x2Fcm", "cond0ms0x2Fcm", "c0mS0x2Fcm", "cond0mS0x2Fcm"):
+    if name in (
+        "c0ms0x2Fcm", "cond0ms0x2Fcm", "c0mS0x2Fcm", "cond0mS0x2Fcm",
+        "cond_ms_cm", "conductivity_ms_cm", "cond_mscm", "conductivity_mscm",
+        "cond_mS_cm", "conductivity_mS_cm",
+    ):
         return "CNDC", data / 10.0, ""       # mS/cm → S/m
-    if name in ("c0us0x2Fcm", "cond0us0x2Fcm", "c0uS0x2Fcm", "cond0uS0x2Fcm"):
+    if name in (
+        "c0us0x2Fcm", "cond0us0x2Fcm", "c0uS0x2Fcm", "cond0uS0x2Fcm",
+        "cond_us_cm", "conductivity_us_cm", "cond_uS_cm", "conductivity_uS_cm",
+        "cond_uscm", "conductivity_uscm", "cond_uScm", "conductivity_uScm",
+    ):
         return "CNDC", data / 10000.0, ""    # µS/cm → S/m
 
     # ---- Salinity ---------------------------------------------------------
