@@ -318,7 +318,7 @@ def _apply_global_attrs_from_schema(
     This applies mandatory and default IMOS attributes from the global_attributes.yaml
     schema, then overlays metadata-provided values.
     """
-    prepared = dataset.copy(deep=True)
+    prepared = _apply_global_attrs(dataset, metadata)
     time_values = _time_values_to_datetime(prepared["TIME"].values)
     if len(time_values) == 0:
         raise ValueError("Cannot write an empty dataset.")
