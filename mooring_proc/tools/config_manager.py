@@ -9,12 +9,14 @@ import yaml
 
 
 def _schema_dir(schema_dir: str | None = None) -> Path:
-    base = Path(schema_dir) if schema_dir else (Path(__file__).parent / "schemas")
-    if not base.is_absolute():
-        base = (Path.cwd() / base).resolve()
-    else:
-        base = base.resolve()
-    return base
+    """Resolve the schema directory without depending on the notebook CWD.
+
+    If an explicit schema_dir is provided, resolve it directly. Otherwise,
+    default to the package-local schemas directory next to this module.
+    """
+    if schema_dir:
+        return Path(schema_dir).expanduser().resolve()
+    return (Path(__file__).resolve().parent / "schemas").resolve()
 
 
 def load_schema_config(schema_path, overrides=None):
@@ -24,7 +26,7 @@ def load_schema_config(schema_path, overrides=None):
     else:
         path = Path(str(schema_path)).expanduser()
         if not path.is_absolute():
-            path = (Path.cwd() / path).resolve()
+            path = path.resolve()
         else:
             path = path.resolve()
         if not path.exists():
