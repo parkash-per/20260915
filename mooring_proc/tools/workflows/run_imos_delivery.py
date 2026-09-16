@@ -201,7 +201,7 @@ def _delivery_metadata(row, cfg, version: str, dataset: xr.Dataset, schema_dir: 
         "start_of_good_data": attrs.get("time_coverage_start", row.get("time_coverage_start", row.get("deploy_date"))),
         "time_coverage_start": attrs.get("time_coverage_start", row.get("time_coverage_start", row.get("deploy_date"))),
         "time_coverage_end": attrs.get("time_coverage_end", row.get("time_coverage_end", row.get("recovery_date"))),
-        "inst_channels": attrs.get("mooring_channels", cfg.get("mooring_channels", row.get("mooring_channels", ""))),
+        "inst_channels": attrs.get("inst_channels", cfg.get("inst_channels", row.get("inst_channels", row.get("mooring_channels", "")))),
         "mooring_channels": attrs.get("mooring_channels", cfg.get("mooring_channels", row.get("mooring_channels", ""))),
     }
 

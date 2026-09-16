@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from mooring_proc.tools.imos.attributes import apply_imos_mandatory_attributes
 from mooring_proc.tools.imos.publisher import publish_delivery
 from mooring_proc.tools.imos.writer import build_output_filename, write_imos_file
 
@@ -126,6 +127,17 @@ class ImosMetadataTests(unittest.TestCase):
         self.assertEqual(attrs["source_file"], "input_file.cnv")
         self.assertEqual(attrs["processing_version"], "01")
         self.assertNotIn("output_stage", attrs)
+
+    def test_apply_imos_mandatory_attributes_ignores_blank_coordinate_overrides(self):
+        dataset = _sample_dataset()
+
+        updated = apply_imos_mandatory_attributes(
+            dataset,
+            overrides={"latitude": "", "longitude": None},
+        )
+
+        self.assertEqual(updated.attrs["geospatial_lat_max"], -40.5)
+        self.assertEqual(updated.attrs["geospatial_lon_max"], 145.25)
 
 
 if __name__ == "__main__":

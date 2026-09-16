@@ -93,8 +93,24 @@ def load_imos_geospatial_attributes(
         "vertical_min": "geospatial_vertical_min",
     }
     override_values = dict(overrides or {})
-    latitude = override_values.get("latitude", dataset.attrs.get("latitude", _dataset_scalar(dataset, "LATITUDE")))
-    longitude = override_values.get("longitude", dataset.attrs.get("longitude", _dataset_scalar(dataset, "LONGITUDE")))
+    latitude = None
+    for value in (
+        override_values.get("latitude"),
+        dataset.attrs.get("latitude"),
+        _dataset_scalar(dataset, "LATITUDE"),
+    ):
+        if not _is_blank(value):
+            latitude = value
+            break
+    longitude = None
+    for value in (
+        override_values.get("longitude"),
+        dataset.attrs.get("longitude"),
+        _dataset_scalar(dataset, "LONGITUDE"),
+    ):
+        if not _is_blank(value):
+            longitude = value
+            break
     depth = None
     for value in (
         override_values.get("depth"),
