@@ -41,8 +41,8 @@ def publish_delivery(delivery_path, destination, metadata=None, instrument: str 
     if input_path is not None:
         combined_metadata.setdefault("source_file", input_path.name)
     source_file_value = combined_metadata.get("source_file", "")
-    if isinstance(source_file_value, str) and source_file_value:
-        combined_metadata["source_file"] = Path(source_file_value).name
+    if str(source_file_value or "").strip():
+        combined_metadata["source_file"] = Path(str(source_file_value)).name
     resolved_instrument = instrument or combined_metadata.get("inst_type") or combined_metadata.get("instrument")
     return write_imos_file(
         dataset,
