@@ -127,10 +127,15 @@ output_variables:
     dimensions: ["TIME"]
     fill_value: 99
     attributes:
-      long_name: "quality flag for sea_water_temperature"
       standard_name: "sea_water_temperature status_flag"
+      long_name: "quality control flag for sea_water_temperature"
+      coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
+      quality_control_conventions: "IMOS standard flags"
+      quality_control_set: "1"
+      valid_min: 0
+      valid_max: 9
       flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-      flag_meanings: "No_QC_performed Good_data Probably_good_data Bad_data_that_are_potentially_correctable Bad_data Value_changed Not_used Not_used Not_used Missing_value"
+      flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
   
   CNDC:
     type: "f4"
@@ -150,10 +155,15 @@ output_variables:
     dimensions: ["TIME"]
     fill_value: 99
     attributes:
-      long_name: "quality flag for sea_water_electrical_conductivity"
       standard_name: "sea_water_electrical_conductivity status_flag"
+      long_name: "quality control flag for sea_water_electrical_conductivity"
+      coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
+      quality_control_conventions: "IMOS standard flags"
+      quality_control_set: "1"
+      valid_min: 0
+      valid_max: 9
       flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-      flag_meanings: "No_QC_performed Good_data Probably_good_data Bad_data_that_are_potentially_correctable Bad_data Value_changed Not_used Not_used Not_used Missing_value"
+      flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
   
   PSAL:
     type: "f4"
@@ -173,10 +183,15 @@ output_variables:
     dimensions: ["TIME"]
     fill_value: 99
     attributes:
-      long_name: "quality flag for sea_water_practical_salinity"
       standard_name: "sea_water_practical_salinity status_flag"
+      long_name: "quality control flag for sea_water_practical_salinity"
+      coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
+      quality_control_conventions: "IMOS standard flags"
+      quality_control_set: "1"
+      valid_min: 0
+      valid_max: 9
       flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-      flag_meanings: "No_QC_performed Good_data Probably_good_data Bad_data_that_are_potentially_correctable Bad_data Value_changed Not_used Not_used Not_used Missing_value"
+      flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
   
   PRES:
     type: "f4"
@@ -196,10 +211,15 @@ output_variables:
     dimensions: ["TIME"]
     fill_value: 99
     attributes:
-      long_name: "quality flag for sea_water_pressure"
       standard_name: "sea_water_pressure status_flag"
+      long_name: "quality control flag for sea_water_pressure"
+      coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
+      quality_control_conventions: "IMOS standard flags"
+      quality_control_set: "1"
+      valid_min: 0
+      valid_max: 9
       flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-      flag_meanings: "No_QC_performed Good_data Probably_good_data Bad_data_that_are_potentially_correctable Bad_data Value_changed Not_used Not_used Not_used Missing_value"
+      flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
   
   DEPTH:
     type: "f4"
@@ -221,7 +241,12 @@ output_variables:
     dimensions: ["TIME"]
     fill_value: 99
     attributes:
-      long_name: "quality flag for depth"
       standard_name: "depth status_flag"
+      long_name: "quality control flag for depth"
+      coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
+      quality_control_conventions: "IMOS standard flags"
+      quality_control_set: "1"
+      valid_min: 0
+      valid_max: 9
       flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-      flag_meanings: "No_QC_performed Good_data Probably_good_data Bad_data_that_are_potentially_correctable Bad_data Value_changed Not_used Not_used Not_used Missing_value"
+      flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
