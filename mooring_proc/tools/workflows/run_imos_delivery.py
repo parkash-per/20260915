@@ -34,6 +34,18 @@ def _instrument_key(config: dict[str, Any], instrument_id: Any):
 _SUPPORTED = {"AQD", "SBE26", "SBE37", "RBRQ", "SIG500"}
 
 
+def _is_blank(value: Any) -> bool:
+    text = str(value or "").strip()
+    return text == "" or text.lower() in {"nan", "none"}
+
+
+def _first_non_blank(*values: Any) -> Any:
+    for value in values:
+        if not _is_blank(value):
+            return value
+    return ""
+
+
 def _instrument_type(row: Any) -> str:
     inst = str(row.get("inst_type", "")).strip().upper()
     if inst not in _SUPPORTED:
@@ -82,7 +94,6 @@ _INTERMEDIATE_ONLY_ATTRS = {
     "proc_1_path",
     "proc_2_path",
     "input_file_path",
-    "source_file",
     "output_dir",
     "output_stage",
     "output_name_mode",
@@ -160,21 +171,19 @@ def _sanitise_delivery_dataset(dataset: xr.Dataset, schema_dir: str | None = Non
     # Optionally validate against allowed attributes (currently permissive)
     # In the future, this could enforce a strict whitelist
     
-    # Ensure delivery stage is set
-    cleaned.attrs["output_stage"] = "imos_delivery"
+    source_file_value = cleaned.attrs.get("source_file", "")
+    if not _is_blank(source_file_value):
+        cleaned.attrs["source_file"] = Path(str(source_file_value)).name
     
     return cleaned
 
 
-def _delivery_metadata(row, cfg, version: str, input_path: Path, schema_dir: str | None = None) -> dict[str, Any]:
+def _delivery_metadata(row, cfg, version: str, dataset: xr.Dataset, schema_dir: str | None = None) -> dict[str, Any]:
     """Build metadata dict for the final delivery file.
     
-    Loads the proc_2 file, removes intermediate attributes, and constructs
+    Uses the sanitized proc_2 dataset, removes intermediate attributes, and constructs
     the metadata needed for the delivery output filename and attributes.
     """
-    with xr.open_dataset(input_path) as opened_dataset:
-        dataset = opened_dataset.load()
-
     attrs = dict(dataset.attrs)
     
     # Remove intermediate-only attributes
@@ -183,19 +192,30 @@ def _delivery_metadata(row, cfg, version: str, input_path: Path, schema_dir: str
     
     # Normalize source_file to just the filename (not full path)
     source_file_value = attrs.get("source_file", "")
-    if isinstance(source_file_value, str) and source_file_value:
-        attrs["source_file"] = Path(source_file_value).name
+    if not _is_blank(source_file_value):
+        attrs["source_file"] = Path(str(source_file_value)).name
 
     depth_value = attrs.get("NOMINAL_DEPTH", row.get("nominal_depth", cfg.get("nominal_depth", 0)))
     if "NOMINAL_DEPTH" in dataset.variables:
         depth_value = float(dataset["NOMINAL_DEPTH"].values)
+    inst_channels = _first_non_blank(
+        attrs.get("inst_channels"),
+        cfg.get("inst_channels"),
+        row.get("inst_channels"),
+        row.get("mooring_channels"),
+    )
+    mooring_channels = _first_non_blank(
+        attrs.get("mooring_channels"),
+        cfg.get("mooring_channels"),
+        row.get("mooring_channels"),
+        inst_channels,
+    )
     
     return {
         **cfg,
         **row.to_dict(),
         **attrs,
         "output_name_mode": "imos",
-        "output_stage": "imos_delivery",
         "version": version,
         "location": cfg.get("location", row.get("location", "")),
         "instrument": row.get("inst_type", "AQD"),
@@ -205,8 +225,8 @@ def _delivery_metadata(row, cfg, version: str, input_path: Path, schema_dir: str
         "start_of_good_data": attrs.get("time_coverage_start", row.get("time_coverage_start", row.get("deploy_date"))),
         "time_coverage_start": attrs.get("time_coverage_start", row.get("time_coverage_start", row.get("deploy_date"))),
         "time_coverage_end": attrs.get("time_coverage_end", row.get("time_coverage_end", row.get("recovery_date"))),
-        "inst_channels": attrs.get("mooring_channels", cfg.get("inst_channels", row.get("mooring_channels", ""))),
-        "mooring_channels": attrs.get("mooring_channels", cfg.get("mooring_channels", row.get("mooring_channels", ""))),
+        "inst_channels": inst_channels,
+        "mooring_channels": mooring_channels,
     }
 
 
@@ -276,6 +296,13 @@ def run_imos_delivery(config, instrument_id=None, input_dataset=None):
 
     # Sanitize: remove all intermediate-only attributes before validation
     final_dataset_for_validation = _sanitise_delivery_dataset(proc_2_ds, schema_dir=schema_dir)
+    delivery_version = _first_non_blank(
+        config.get("version"),
+        final_dataset_for_validation.attrs.get("processing_version"),
+        cfg.get("version"),
+        row.get("version"),
+        "01",
+    )
     
     # Run compliance check on the cleaned dataset
     run_compliance_check(
@@ -284,16 +311,27 @@ def run_imos_delivery(config, instrument_id=None, input_dataset=None):
     )
 
     # Build final metadata for the output filename and attributes
-    final_metadata = _delivery_metadata(row, cfg, "1", final_dataset_path, schema_dir=schema_dir) | attr_overrides
+    final_metadata = _delivery_metadata(
+        row,
+        cfg,
+        str(delivery_version),
+        final_dataset_for_validation,
+        schema_dir=schema_dir,
+    ) | attr_overrides
     
     # Final cleanup: ensure no intermediate attributes in the metadata dict itself
     final_metadata = {k: v for k, v in final_metadata.items() if k not in _INTERMEDIATE_ONLY_ATTRS}
     final_metadata["output_name_mode"] = "imos"
-    final_metadata["output_stage"] = "imos_delivery"
-    final_metadata["version"] = "01"
+    final_metadata["version"] = str(delivery_version)
 
     # Publish the FV01 output to delivery directory
-    fv01_output = publish_delivery(final_dataset_path, delivery_dir, metadata=final_metadata)
+    fv01_output = publish_delivery(
+        final_dataset_for_validation,
+        delivery_dir,
+        metadata=final_metadata,
+        instrument=inst_type,
+        schema_dir=schema_dir,
+    )
 
     # Update metadata tracking
     update_metadata_file_fields(

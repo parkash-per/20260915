@@ -10,8 +10,9 @@ mandatory_attributes:
   data_centre_email: "info@aodn.org.au"
   disclaimer: "Data, products and services from IMOS are provided \"as is\" without any warranty as to fitness for a particular purpose."
   license: "Creative Commons Attribution 4.0 International (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/"
-  distribution_statment: "Data may be re-used, provided that related metadata explaining the data has been reviewed by the user, and the data is appropriately acknowledged."
+  distribution_statement: "Data may be re-used, provided that related metadata explaining the data has been reviewed by the user, and the data is appropriately acknowledged."
   institution: "SRS"
+  keywords: "TIME, TIMESERIES, LATITUDE, LONGITUDE, NOMINAL_DEPTH"
   keywords_vocabulary: "IMOS parameter names. See https://github.com/aodn/imos-toolbox/blob/2.5/IMOS/imosParameters.txt"
   naming_authority: "IMOS"
   project: "Integrated Marine Observing System (IMOS)"
@@ -27,10 +28,10 @@ defaults:
 
 # Geospatial attributes (set from parameters)
 geospatial:
-  positive: "down"
-  lat_max: null  # Set from latitude parameter
-  lat_min: null
-  lon_max: null  # Set from longitude parameter
-  lon_min: null
-  vertical_max: null  # Set from depth parameter
-  vertical_min: null
+  geospatial_vertical_positive: "down"
+  geospatial_lat_max: null  # Set from latitude parameter
+  geospatial_lat_min: null
+  geospatial_lon_max: null  # Set from longitude parameter
+  geospatial_lon_min: null
+  geospatial_vertical_max: null  # Set from depth parameter
+  geospatial_vertical_min: null

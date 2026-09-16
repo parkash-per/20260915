@@ -13,6 +13,19 @@ from ..config_manager import load_global_attributes, load_instrument_schema
 
 
 TIME_UNITS = "days since 1950-01-01T00:00:00 UTC"
+_INTERNAL_METADATA_KEYS = {
+    "proc_1_file",
+    "proc_2_file",
+    "proc_1_path",
+    "proc_2_path",
+    "input_file_path",
+    "output_dir",
+    "output_stage",
+    "output_name_mode",
+    "manual_qc_flags",
+    "flag_windows",
+    "range_tag",
+}
 
 VARIABLE_ATTRS = {
     "TEMP": {"units": "degrees_Celsius", "long_name": "sea_water_temperature"},
@@ -84,6 +97,93 @@ def _depth_token(value: Any) -> str:
         return f"{str(value).strip()}m"
 
 
+def _normalize_source_file(value: Any) -> str:
+    if _is_blank(value):
+        return ""
+    return Path(str(value)).name
+
+
+def _normalize_metadata_for_netcdf(metadata: dict[str, Any]) -> dict[str, Any]:
+    cleaned = {key: value for key, value in metadata.items() if key not in _INTERNAL_METADATA_KEYS}
+    if "source_file" in cleaned:
+        cleaned["source_file"] = _normalize_source_file(cleaned.get("source_file"))
+    return cleaned
+
+
+def _normalize_dataset_attrs_for_netcdf(dataset: xr.Dataset) -> xr.Dataset:
+    prepared = dataset.copy(deep=True)
+    attrs = {key: value for key, value in dict(prepared.attrs).items() if key not in _INTERNAL_METADATA_KEYS}
+    if "source_file" in attrs:
+        attrs["source_file"] = _normalize_source_file(attrs.get("source_file"))
+    prepared.attrs = attrs
+    return prepared
+
+
+def _channel_token(metadata: dict[str, Any]) -> str:
+    for key in ("mooring_channels", "inst_channels"):
+        value = metadata.get(key)
+        if not _is_blank(value):
+            return str(value)
+    return ""
+
+
+def _scalar_metadata_value(prepared: xr.Dataset, metadata: dict[str, Any], attrs: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = metadata.get(key, attrs.get(key))
+        if not _is_blank(value):
+            return value
+    for variable_name in {key.upper() for key in keys}:
+        if variable_name not in prepared.variables:
+            continue
+        raw_value = np.asarray(prepared[variable_name].values).squeeze()
+        if np.size(raw_value) == 1:
+            scalar = raw_value.item()
+            if not _is_blank(scalar):
+                return scalar
+    return None
+
+
+def _schema_global_attrs(prepared: xr.Dataset, metadata: dict[str, Any], attrs: dict[str, Any], schema_dir: str | None) -> dict[str, Any]:
+    global_schema = load_global_attributes(schema_dir=schema_dir)
+    resolved = {}
+
+    for section_name in ("mandatory_attributes", "defaults"):
+        section = global_schema.get(section_name, {}) or {}
+        if isinstance(section, dict):
+            resolved.update(section)
+
+    geospatial = global_schema.get("geospatial", {}) or {}
+    geospatial_aliases = {
+        "positive": "geospatial_vertical_positive",
+        "lat_max": "geospatial_lat_max",
+        "lat_min": "geospatial_lat_min",
+        "lon_max": "geospatial_lon_max",
+        "lon_min": "geospatial_lon_min",
+        "vertical_max": "geospatial_vertical_max",
+        "vertical_min": "geospatial_vertical_min",
+    }
+    latitude = _scalar_metadata_value(prepared, metadata, attrs, "latitude")
+    longitude = _scalar_metadata_value(prepared, metadata, attrs, "longitude")
+    nominal_depth = _scalar_metadata_value(prepared, metadata, attrs, "depth", "nominal_depth")
+    geospatial_values = {
+        "geospatial_lat_max": latitude,
+        "geospatial_lat_min": latitude,
+        "geospatial_lon_max": longitude,
+        "geospatial_lon_min": longitude,
+        "geospatial_vertical_max": nominal_depth,
+        "geospatial_vertical_min": nominal_depth,
+    }
+
+    if isinstance(geospatial, dict):
+        for key, value in geospatial.items():
+            attr_key = geospatial_aliases.get(key, key)
+            if value is None and attr_key in geospatial_values:
+                value = geospatial_values[attr_key]
+            resolved[attr_key] = value
+
+    return resolved
+
+
 def _resolve_output_name_mode(metadata: dict[str, Any]) -> str:
     mode = str(metadata.get("output_name_mode", "")).strip().lower()
     if mode:
@@ -121,7 +221,7 @@ def build_output_filename(metadata=None):
     if output_name_mode == "imos":
         version = _resolve_version(metadata)
         return (
-            f"IMOS_SRSALT_{metadata.get('inst_channels', metadata.get('mooring_channels', ''))}_"
+            f"IMOS_SRSALT_{_channel_token(metadata)}_"
             f"{start_time.strftime('%Y%m%dT%H%M%SZ')}_{_site_token(metadata.get('location'))}_"
             f"FV{version}_{_instrument_token(metadata.get('instrument', metadata.get('inst_type', 'AQD')))}"
             f"d{int(round(float(metadata.get('depth', metadata.get('nominal_depth', 0)))))}m.nc"
@@ -218,7 +318,7 @@ def _apply_global_attrs_from_schema(
     This applies mandatory and default IMOS attributes from the global_attributes.yaml
     schema, then overlays metadata-provided values.
     """
-    prepared = dataset.copy(deep=True)
+    prepared = _apply_global_attrs(dataset, metadata)
     time_values = _time_values_to_datetime(prepared["TIME"].values)
     if len(time_values) == 0:
         raise ValueError("Cannot write an empty dataset.")
@@ -232,19 +332,9 @@ def _apply_global_attrs_from_schema(
     
     # Try to load and apply schema defaults
     try:
-        global_schema = load_global_attributes(schema_dir=schema_dir)
-        
-        # Apply mandatory attributes from schema
-        if "mandatory_attributes" in global_schema:
-            for key, value in global_schema["mandatory_attributes"].items():
-                if key not in attrs:  # Don't override if already set
-                    attrs[key] = value
-        
-        # Apply default attributes from schema
-        if "defaults" in global_schema:
-            for key, value in global_schema["defaults"].items():
-                if key not in attrs:  # Don't override if already set
-                    attrs[key] = value
+        for key, value in _schema_global_attrs(prepared, metadata, attrs, schema_dir).items():
+            if key not in attrs and not _is_blank(value):
+                attrs[key] = value
     except Exception:
         pass  # If schema loading fails, continue with existing attributes
     
@@ -259,7 +349,7 @@ def _apply_global_attrs_from_schema(
             "processing_version": _normalize_processing_version(metadata.get("version", attrs.get("processing_version", ""))),
             "time_coverage_start": str(metadata.get("time_coverage_start") or derived_start_text),
             "time_coverage_end": str(metadata.get("time_coverage_end") or derived_end_text),
-            "output_stage": str(metadata.get("output_stage", attrs.get("output_stage", ""))),
+            "source_file": _normalize_source_file(metadata.get("source_file", attrs.get("source_file", ""))),
         }
     )
     prepared.attrs = attrs
@@ -287,7 +377,7 @@ def _apply_global_attrs(dataset: xr.Dataset, metadata: dict[str, Any]) -> xr.Dat
             "processing_version": _normalize_processing_version(metadata.get("version", attrs.get("processing_version", ""))),
             "time_coverage_start": str(metadata.get("time_coverage_start") or derived_start_text),
             "time_coverage_end": str(metadata.get("time_coverage_end") or derived_end_text),
-            "output_stage": str(metadata.get("output_stage", attrs.get("output_stage", ""))),
+            "source_file": _normalize_source_file(metadata.get("source_file", attrs.get("source_file", ""))),
         }
     )
     prepared.attrs = attrs
@@ -316,17 +406,19 @@ def _prepare_dataset_for_write(
     schema_dir : str, optional
         Path to schemas directory
     """
+    sanitized_dataset = _normalize_dataset_attrs_for_netcdf(dataset)
+
     # Apply variable attributes from schema if instrument is provided
-    if instrument and schema_dir:
+    if instrument:
         try:
-            prepared = _apply_variable_attrs_from_schema(dataset, instrument, schema_dir=schema_dir)
+            prepared = _apply_variable_attrs_from_schema(sanitized_dataset, instrument, schema_dir=schema_dir)
         except Exception:
-            prepared = _apply_variable_attrs(dataset)
+            prepared = _apply_variable_attrs(sanitized_dataset)
     else:
-        prepared = _apply_variable_attrs(dataset)
+        prepared = _apply_variable_attrs(sanitized_dataset)
     
     # Apply global attributes from schema if instrument is provided
-    if instrument and schema_dir:
+    if instrument:
         try:
             prepared = _apply_global_attrs_from_schema(prepared, metadata, instrument, schema_dir=schema_dir)
         except Exception:
@@ -374,6 +466,7 @@ def write_imos_file(dataset, output_path, metadata=None, instrument=None, schema
         raise KeyError("TIME not found in dataset")
 
     metadata = dict(metadata or {})
+    metadata = _normalize_metadata_for_netcdf(metadata)
     
     # Infer instrument from metadata if not explicitly provided
     if not instrument:
