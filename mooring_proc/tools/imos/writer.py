@@ -120,7 +120,11 @@ def _normalize_dataset_attrs_for_netcdf(dataset: xr.Dataset) -> xr.Dataset:
 
 
 def _channel_token(metadata: dict[str, Any]) -> str:
-    return str(metadata.get("mooring_channels", metadata.get("inst_channels", "")))
+    for key in ("mooring_channels", "inst_channels"):
+        value = metadata.get(key)
+        if not _is_blank(value):
+            return str(value)
+    return ""
 
 
 def _scalar_metadata_value(prepared: xr.Dataset, metadata: dict[str, Any], attrs: dict[str, Any], *keys: str) -> Any:

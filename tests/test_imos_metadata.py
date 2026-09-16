@@ -48,6 +48,22 @@ class ImosMetadataTests(unittest.TestCase):
         self.assertNotIn("_TCS_", output_name)
         self.assertIn("_FV00_", output_name)
 
+    def test_build_output_filename_falls_back_when_mooring_channels_is_blank(self):
+        output_name = build_output_filename(
+            {
+                "output_name_mode": "imos",
+                "version": "01",
+                "start_of_good_data": "2025-08-23T06:00:00Z",
+                "location": "BASJAS",
+                "instrument": "SBE37",
+                "depth": 52,
+                "inst_channels": "TCS",
+                "mooring_channels": "",
+            }
+        )
+
+        self.assertIn("_TCS_", output_name)
+
     def test_write_imos_file_filters_internal_attrs_and_applies_schema_defaults(self):
         dataset = _sample_dataset()
 
@@ -145,6 +161,9 @@ class ImosMetadataTests(unittest.TestCase):
 
         self.assertEqual(updated.attrs["geospatial_lat_max"], -40.5)
         self.assertEqual(updated.attrs["geospatial_lon_max"], 145.25)
+        self.assertEqual(updated.attrs["project"], "Integrated Marine Observing System (IMOS)")
+        self.assertEqual(updated.attrs["institution"], "SRS")
+        self.assertEqual(updated.attrs["geospatial_vertical_positive"], "down")
 
 
 if __name__ == "__main__":
