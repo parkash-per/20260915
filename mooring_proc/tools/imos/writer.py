@@ -406,16 +406,16 @@ def _prepare_dataset_for_write(
     schema_dir : str, optional
         Path to schemas directory
     """
-    dataset = _normalize_dataset_attrs_for_netcdf(dataset)
+    sanitized_dataset = _normalize_dataset_attrs_for_netcdf(dataset)
 
     # Apply variable attributes from schema if instrument is provided
     if instrument:
         try:
-            prepared = _apply_variable_attrs_from_schema(dataset, instrument, schema_dir=schema_dir)
+            prepared = _apply_variable_attrs_from_schema(sanitized_dataset, instrument, schema_dir=schema_dir)
         except Exception:
-            prepared = _apply_variable_attrs(dataset)
+            prepared = _apply_variable_attrs(sanitized_dataset)
     else:
-        prepared = _apply_variable_attrs(dataset)
+        prepared = _apply_variable_attrs(sanitized_dataset)
     
     # Apply global attributes from schema if instrument is provided
     if instrument:
