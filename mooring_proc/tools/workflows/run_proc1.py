@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
+import xarray as xr
 
+from ..config_manager import load_instrument_schema
 from ..database_lookup import get_instrument_context, update_metadata_file_fields
 from ..imos.writer import build_output_filename, write_imos_file
 from ..parsers.read_aqd import read_aqd
@@ -74,6 +77,68 @@ def _stage_dir(path_value: Any) -> Path:
     return path
 
 
+def _ensure_qc_variables(
+    dataset: xr.Dataset,
+    instrument: str,
+    schema_dir: str | None = None,
+    default_flag: int = 0,
+) -> xr.Dataset:
+    """Ensure all required QC variables exist in the dataset with default flag values.
+    
+    For each output variable in the schema, if the corresponding *_quality_control
+    variable is missing, create it with the given default flag value.
+    
+    Parameters
+    ----------
+    dataset : xr.Dataset
+        The dataset to augment
+    instrument : str
+        Instrument type (e.g. "SBE37") to look up schema
+    schema_dir : str, optional
+        Path to schemas directory; defaults to tools/schemas
+    default_flag : int, default 0
+        Default QC flag value. For proc_1, use 0 (no QC applied).
+        For proc_2, use 1 (good data).
+    
+    Returns
+    -------
+    xr.Dataset
+        New dataset with all required QC variables present.
+    """
+    schema = load_instrument_schema(instrument, schema_dir=schema_dir)
+    output_vars = schema.get("output_variables", {}) or {}
+    
+    result = dataset.copy(deep=False)
+    
+    for var_name, var_meta in output_vars.items():
+        if not var_name.endswith("_quality_control") or not isinstance(var_meta, dict):
+            continue
+        
+        if var_name in result.variables:
+            continue
+        
+        # Extract the base variable name (e.g. TEMP from TEMP_quality_control)
+        base_var_name = var_name.removesuffix("_quality_control")
+        
+        # Only create QC variable if the base variable exists
+        if base_var_name not in result.variables:
+            continue
+        
+        # Get dimensions from the base variable
+        base_var = result[base_var_name]
+        dims = list(base_var.dims)
+        
+        # Create the QC variable filled with the default flag value
+        qc_data = np.full(base_var.shape, fill_value=default_flag, dtype=np.int8)
+        result[var_name] = xr.DataArray(qc_data, dims=dims)
+        
+        # Apply schema attributes if available
+        if "attributes" in var_meta and isinstance(var_meta["attributes"], dict):
+            result[var_name].attrs.update(var_meta["attributes"])
+    
+    return result
+
+
 def _plot_review(dataset, output_path: Path, title: str, start_time: pd.Timestamp, end_time: pd.Timestamp):
     import matplotlib.pyplot as plt
 
@@ -105,9 +170,9 @@ def _select_dataset(parsed: dict[str, Any], config: dict[str, Any]):
 def run_proc1(config, instrument_id=None, source_path=None):
     """Run proc_1 for AQD, SBE26, SBE37, RBRQ, or SIG500.
     
-    Produces IMOS FV00 output. Quality control variables are excluded
-    from the final FV00 output; they are only used for internal QC window
-    tracking and flagging during the trimming process.
+    Produces IMOS FV00 output with quality control variables initialized
+    to flag value 0 (no QC applied). These variables will be updated in
+    proc_2 with proper quality flags and manual QC annotations.
     """
     metadata_source = _metadata_source(config)
     inst_deploy_id = _instrument_key(config, instrument_id)
@@ -167,15 +232,16 @@ def run_proc1(config, instrument_id=None, source_path=None):
     if inst_type == "AQD":
         _plot_review(trimmed_dataset, post_plot_path, "AQD proc_1 post-trim review", start_time, end_time)
 
-    # Drop quality_control variables from FV00 output
-    # These are only used for internal QC tracking; proc_2 will handle final quality flags
-    proc_1_dataset = trimmed_dataset.drop_vars(
-        [name for name in trimmed_dataset.data_vars if name.endswith("_quality_control")],
-        errors="ignore"
+    # Ensure all required QC variables exist with default flag = 0
+    schema_dir = config.get("schema_dir")
+    proc_1_dataset = _ensure_qc_variables(
+        trimmed_dataset,
+        inst_type,
+        schema_dir=schema_dir,
+        default_flag=0,
     )
 
     # Write proc_1 FV00 file with schema-driven attributes
-    schema_dir = config.get("schema_dir")
     proc_1_output = write_imos_file(
         proc_1_dataset,
         output_path,
