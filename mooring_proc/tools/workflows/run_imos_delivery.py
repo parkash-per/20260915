@@ -34,6 +34,18 @@ def _instrument_key(config: dict[str, Any], instrument_id: Any):
 _SUPPORTED = {"AQD", "SBE26", "SBE37", "RBRQ", "SIG500"}
 
 
+def _is_blank(value: Any) -> bool:
+    text = str(value or "").strip()
+    return text == "" or text.lower() in {"nan", "none"}
+
+
+def _first_non_blank(*values: Any) -> Any:
+    for value in values:
+        if not _is_blank(value):
+            return value
+    return ""
+
+
 def _instrument_type(row: Any) -> str:
     inst = str(row.get("inst_type", "")).strip().upper()
     if inst not in _SUPPORTED:
@@ -186,6 +198,18 @@ def _delivery_metadata(row, cfg, version: str, dataset: xr.Dataset, schema_dir: 
     depth_value = attrs.get("NOMINAL_DEPTH", row.get("nominal_depth", cfg.get("nominal_depth", 0)))
     if "NOMINAL_DEPTH" in dataset.variables:
         depth_value = float(dataset["NOMINAL_DEPTH"].values)
+    inst_channels = _first_non_blank(
+        attrs.get("inst_channels"),
+        cfg.get("inst_channels"),
+        row.get("inst_channels"),
+        row.get("mooring_channels"),
+    )
+    mooring_channels = _first_non_blank(
+        attrs.get("mooring_channels"),
+        cfg.get("mooring_channels"),
+        row.get("mooring_channels"),
+        inst_channels,
+    )
     
     return {
         **cfg,
@@ -201,14 +225,8 @@ def _delivery_metadata(row, cfg, version: str, dataset: xr.Dataset, schema_dir: 
         "start_of_good_data": attrs.get("time_coverage_start", row.get("time_coverage_start", row.get("deploy_date"))),
         "time_coverage_start": attrs.get("time_coverage_start", row.get("time_coverage_start", row.get("deploy_date"))),
         "time_coverage_end": attrs.get("time_coverage_end", row.get("time_coverage_end", row.get("recovery_date"))),
-        "inst_channels": attrs.get("inst_channels", cfg.get("inst_channels", row.get("inst_channels", row.get("mooring_channels", "")))),
-        "mooring_channels": attrs.get(
-            "mooring_channels",
-            cfg.get(
-                "mooring_channels",
-                row.get("mooring_channels", attrs.get("inst_channels", cfg.get("inst_channels", row.get("inst_channels", "")))),
-            ),
-        ),
+        "inst_channels": inst_channels,
+        "mooring_channels": mooring_channels,
     }
 
 

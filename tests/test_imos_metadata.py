@@ -3,11 +3,13 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from mooring_proc.tools.imos.attributes import apply_imos_mandatory_attributes
 from mooring_proc.tools.imos.publisher import publish_delivery
 from mooring_proc.tools.imos.writer import build_output_filename, write_imos_file
+from mooring_proc.tools.workflows.run_imos_delivery import _delivery_metadata
 
 
 def _sample_dataset() -> xr.Dataset:
@@ -164,6 +166,21 @@ class ImosMetadataTests(unittest.TestCase):
         self.assertEqual(updated.attrs["project"], "Integrated Marine Observing System (IMOS)")
         self.assertEqual(updated.attrs["institution"], "SRS")
         self.assertEqual(updated.attrs["geospatial_vertical_positive"], "down")
+
+    def test_delivery_metadata_falls_back_to_inst_channels_when_mooring_channels_blank(self):
+        dataset = _sample_dataset()
+        dataset.attrs["mooring_channels"] = ""
+        dataset.attrs["inst_channels"] = ""
+
+        metadata = _delivery_metadata(
+            pd.Series({"inst_type": "SBE37", "inst_id": "123", "location": "BASJAS", "mooring_channels": ""}),
+            {"inst_channels": "TCS", "mooring_channels": "", "nominal_depth": 52, "location": "BASJAS"},
+            "01",
+            dataset,
+        )
+
+        self.assertEqual(metadata["inst_channels"], "TCS")
+        self.assertEqual(metadata["mooring_channels"], "TCS")
 
 
 if __name__ == "__main__":
