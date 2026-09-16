@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,51 @@ _INTERNAL_METADATA_KEYS = {
     "flag_windows",
     "range_tag",
 }
+
+# Canonical order for global attributes in IMOS files
+_GLOBAL_ATTR_ORDER = [
+    "project",
+    "Conventions",
+    "title",
+    "institution",
+    "date_created",
+    "abstract",
+    "keywords",
+    "distribution_statement",
+    "geospatial_lat_min",
+    "geospatial_lat_max",
+    "geospatial_lon_min",
+    "geospatial_lon_max",
+    "geospatial_vertical_min",
+    "geospatial_vertical_max",
+    "geospatial_vertical_positive",
+    "time_coverage_start",
+    "time_coverage_end",
+    "data_centre_email",
+    "processing_version",
+    "author_email",
+    "author",
+    "principal_investigator",
+    "naming_authority",
+    "site_code",
+    "site",
+    "instrument",
+    "instrument_serial_number",
+    "serial",
+    "location",
+    "deployment_id",
+    "mooring_channels",
+    "acknowledgement",
+    "citation",
+    "data_centre",
+    "history",
+    "source",
+    "references",
+    "disclaimer",
+    "license",
+    "standard_name_vocabulary",
+    "keywords_vocabulary",
+]
 
 VARIABLE_ATTRS = {
     "TEMP": {"units": "degrees_Celsius", "long_name": "sea_water_temperature"},
@@ -182,6 +228,23 @@ def _schema_global_attrs(prepared: xr.Dataset, metadata: dict[str, Any], attrs: 
             resolved[attr_key] = value
 
     return resolved
+
+
+def _order_global_attrs(attrs: dict[str, Any]) -> OrderedDict[str, Any]:
+    """Order global attributes according to IMOS canonical order."""
+    ordered = OrderedDict()
+    
+    # Add attributes in canonical order
+    for key in _GLOBAL_ATTR_ORDER:
+        if key in attrs:
+            ordered[key] = attrs[key]
+    
+    # Add any remaining attributes not in canonical order
+    for key, value in attrs.items():
+        if key not in ordered:
+            ordered[key] = value
+    
+    return ordered
 
 
 def _resolve_output_name_mode(metadata: dict[str, Any]) -> str:
@@ -352,7 +415,9 @@ def _apply_global_attrs_from_schema(
             "source_file": _normalize_source_file(metadata.get("source_file", attrs.get("source_file", ""))),
         }
     )
-    prepared.attrs = attrs
+    
+    # Order attributes canonically before applying
+    prepared.attrs = _order_global_attrs(attrs)
     return prepared
 
 
@@ -380,7 +445,9 @@ def _apply_global_attrs(dataset: xr.Dataset, metadata: dict[str, Any]) -> xr.Dat
             "source_file": _normalize_source_file(metadata.get("source_file", attrs.get("source_file", ""))),
         }
     )
-    prepared.attrs = attrs
+    
+    # Order attributes canonically before applying
+    prepared.attrs = _order_global_attrs(attrs)
     return prepared
 
 
