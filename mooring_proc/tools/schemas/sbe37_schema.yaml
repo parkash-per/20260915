@@ -2,7 +2,7 @@
 
 instrument: "SBE37"
 default_channel_code: "CSTZ"
-default_keywords: "TIME, TIMESERIES, LATITUDE, LONGITUDE, NOMINAL_DEPTH, TEMP, CNDC, PSAL, PRES, DEPTH"
+default_keywords: "TIME, TIMESERIES, LATITUDE, LONGITUDE, NOMINAL_DEPTH, TEMP, CNDC, PSAL, PRES_REL, DEPTH"
 default_title: "SBE37 CTD data from {location}"
 
 input_variables:
@@ -38,6 +38,14 @@ input_variables:
     default: 1
     dtype: "i1"
     required: false
+  PRES_REL:
+    default: 999999.0
+    dtype: "f8"
+    required: false
+  PRES_REL_quality_control:
+    default: 1
+    dtype: "i1"
+    required: false
   DEPTH:
     default: null
     dtype: "f4"
@@ -60,7 +68,7 @@ output_variables:
       units: "days since 1950-01-01T00:00:00 UTC"
       valid_max: 90000.0
       valid_min: 0.0
-  
+
   TIMESERIES:
     type: "i4"
     dimensions: []
@@ -68,7 +76,7 @@ output_variables:
     attributes:
       cf_role: "timeseries_id"
       long_name: "unique_identifier_for_each_timeseries_feature_instance_in_this_file"
-  
+
   LATITUDE:
     type: "f8"
     dimensions: []
@@ -81,7 +89,7 @@ output_variables:
       units: "degrees_north"
       valid_max: 90.0
       valid_min: -90.0
-  
+
   LONGITUDE:
     type: "f8"
     dimensions: []
@@ -94,7 +102,7 @@ output_variables:
       units: "degrees_east"
       valid_max: 180.0
       valid_min: -180.0
-  
+
   NOMINAL_DEPTH:
     type: "f4"
     dimensions: []
@@ -108,7 +116,7 @@ output_variables:
       units: "m"
       valid_max: 12000.0
       valid_min: -5.0
-  
+
   TEMP:
     type: "f4"
     dimensions: ["TIME"]
@@ -121,7 +129,8 @@ output_variables:
       valid_max: 40.0
       valid_min: -2.5
       ancillary_variables: "TEMP_quality_control"
-  
+      uncertainty: 0.005
+
   TEMP_quality_control:
     type: "i1"
     dimensions: ["TIME"]
@@ -132,11 +141,9 @@ output_variables:
       coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
       quality_control_conventions: "IMOS standard flags"
       quality_control_set: "1"
-      valid_min: 0
-      valid_max: 9
-      flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      flag_values: "0b, 1b, 2b, 3b, 4b, 5b, 6b, 7b, 8b, 9b"
       flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
-  
+
   CNDC:
     type: "f4"
     dimensions: ["TIME"]
@@ -149,7 +156,7 @@ output_variables:
       valid_max: 50000.0
       valid_min: 0.0
       ancillary_variables: "CNDC_quality_control"
-  
+
   CNDC_quality_control:
     type: "i1"
     dimensions: ["TIME"]
@@ -160,11 +167,9 @@ output_variables:
       coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
       quality_control_conventions: "IMOS standard flags"
       quality_control_set: "1"
-      valid_min: 0
-      valid_max: 9
-      flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      flag_values: "0b, 1b, 2b, 3b, 4b, 5b, 6b, 7b, 8b, 9b"
       flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
-  
+
   PSAL:
     type: "f4"
     dimensions: ["TIME"]
@@ -177,7 +182,8 @@ output_variables:
       valid_max: 41.0
       valid_min: 2.0
       ancillary_variables: "PSAL_quality_control"
-  
+      uncertainty: 0.01
+
   PSAL_quality_control:
     type: "i1"
     dimensions: ["TIME"]
@@ -188,11 +194,9 @@ output_variables:
       coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
       quality_control_conventions: "IMOS standard flags"
       quality_control_set: "1"
-      valid_min: 0
-      valid_max: 9
-      flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      flag_values: "0b, 1b, 2b, 3b, 4b, 5b, 6b, 7b, 8b, 9b"
       flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
-  
+
   PRES:
     type: "f4"
     dimensions: ["TIME"]
@@ -205,7 +209,7 @@ output_variables:
       valid_max: 12000.0
       valid_min: -15.0
       ancillary_variables: "PRES_quality_control"
-  
+
   PRES_quality_control:
     type: "i1"
     dimensions: ["TIME"]
@@ -216,11 +220,34 @@ output_variables:
       coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
       quality_control_conventions: "IMOS standard flags"
       quality_control_set: "1"
-      valid_min: 0
-      valid_max: 9
-      flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      flag_values: "0b, 1b, 2b, 3b, 4b, 5b, 6b, 7b, 8b, 9b"
       flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
-  
+
+  PRES_REL:
+    type: "f8"
+    dimensions: ["TIME"]
+    fill_value: null
+    attributes:
+      coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
+      long_name: "sea_water_pressure_anomaly"
+      standard_name: "sea_water_pressure_anomaly"
+      units: "dbar"
+      comment: "Relative pressure with atmospheric offset applied."
+      ancillary_variables: "PRES_REL_quality_control"
+
+  PRES_REL_quality_control:
+    type: "i1"
+    dimensions: ["TIME"]
+    fill_value: 99
+    attributes:
+      standard_name: "sea_water_pressure_anomaly status_flag"
+      long_name: "quality control flag for sea_water_pressure_anomaly"
+      coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
+      quality_control_conventions: "IMOS standard flags"
+      quality_control_set: "1"
+      flag_values: "0b, 1b, 2b, 3b, 4b, 5b, 6b, 7b, 8b, 9b"
+      flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
+
   DEPTH:
     type: "f4"
     dimensions: ["TIME"]
@@ -235,7 +262,7 @@ output_variables:
       valid_max: 12000.0
       valid_min: -5.0
       ancillary_variables: "DEPTH_quality_control"
-  
+
   DEPTH_quality_control:
     type: "i1"
     dimensions: ["TIME"]
@@ -246,7 +273,5 @@ output_variables:
       coordinates: "TIME LATITUDE LONGITUDE NOMINAL_DEPTH"
       quality_control_conventions: "IMOS standard flags"
       quality_control_set: "1"
-      valid_min: 0
-      valid_max: 9
-      flag_values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-      flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"
+      flag_values: "0b, 1b, 2b, 3b, 4b, 5b, 6b, 7b, 8b, 9b"
+      flag_meanings: "no_qc_performed good_data probably_good_data bad_data_that_are_potentially_correctable bad_data value_changed Not_used Not_used Not_used Missing_values"#

@@ -8,7 +8,9 @@ mandatory_attributes:
   Conventions: "CF-1.6,IMOS-1.4"
   data_centre: "Australian Ocean Data Network (AODN)"
   data_centre_email: "info@aodn.org.au"
+  date_created: null  # Set at runtime: ISO 8601 timestamp when file is created
   disclaimer: "Data, products and services from IMOS are provided \"as is\" without any warranty as to fitness for a particular purpose."
+  history: null  # Set at runtime: "created at {date_created}"
   license: "Creative Commons Attribution 4.0 International (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/"
   distribution_statement: "Data may be re-used, provided that related metadata explaining the data has been reviewed by the user, and the data is appropriately acknowledged."
   institution: "SRS"
@@ -16,6 +18,7 @@ mandatory_attributes:
   keywords_vocabulary: "IMOS parameter names. See https://github.com/aodn/imos-toolbox/blob/2.5/IMOS/imosParameters.txt"
   naming_authority: "IMOS"
   project: "Integrated Marine Observing System (IMOS)"
+  source: "IMOS SRS Satellite Altimetry Calibration Validation Facility"
   standard_name_vocabulary: "NetCDF Climate and Forecast (CF) Metadata Convention Standard Name Table 45"
 
 # Default values for configurable attributes

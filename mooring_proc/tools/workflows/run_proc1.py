@@ -198,7 +198,7 @@ def run_proc1(config, instrument_id=None, source_path=None):
             "instrument": row.get("inst_type", inst_type),
             "inst_type": row.get("inst_type", inst_type),
             "inst_id": row.get("inst_id", ""),
-            "depth": row.get("nominal_depth", cfg.get("nominal_depth", 0)),
+            "depth": row.get("nominal_inst_depth", cfg.get("nominal_inst_depth", 0)),
             "start_of_good_data": start_time,
             "time_coverage_start": start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "time_coverage_end": end_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
