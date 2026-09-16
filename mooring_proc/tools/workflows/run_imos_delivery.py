@@ -296,6 +296,13 @@ def run_imos_delivery(config, instrument_id=None, input_dataset=None):
 
     # Sanitize: remove all intermediate-only attributes before validation
     final_dataset_for_validation = _sanitise_delivery_dataset(proc_2_ds, schema_dir=schema_dir)
+    delivery_version = _first_non_blank(
+        config.get("version"),
+        final_dataset_for_validation.attrs.get("processing_version"),
+        cfg.get("version"),
+        row.get("version"),
+        "01",
+    )
     
     # Run compliance check on the cleaned dataset
     run_compliance_check(
@@ -304,12 +311,18 @@ def run_imos_delivery(config, instrument_id=None, input_dataset=None):
     )
 
     # Build final metadata for the output filename and attributes
-    final_metadata = _delivery_metadata(row, cfg, "01", final_dataset_for_validation, schema_dir=schema_dir) | attr_overrides
+    final_metadata = _delivery_metadata(
+        row,
+        cfg,
+        str(delivery_version),
+        final_dataset_for_validation,
+        schema_dir=schema_dir,
+    ) | attr_overrides
     
     # Final cleanup: ensure no intermediate attributes in the metadata dict itself
     final_metadata = {k: v for k, v in final_metadata.items() if k not in _INTERMEDIATE_ONLY_ATTRS}
     final_metadata["output_name_mode"] = "imos"
-    final_metadata["version"] = "01"
+    final_metadata["version"] = str(delivery_version)
 
     # Publish the FV01 output to delivery directory
     fv01_output = publish_delivery(
