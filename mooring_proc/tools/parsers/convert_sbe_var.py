@@ -89,24 +89,24 @@ def convert_sbe_var(
         return "TEMP_2", data, ""
 
     # ---- Conductivity -----------------------------------------------------
-    if name in (
-        "c0S0x2Fm", "cond0S0x2Fm",
-        "conductivity", "cond", "cndc",
-        "cond_s_m", "conductivity_s_m", "cond_sm", "conductivity_sm",
-    ):
-        return "CNDC", data, ""
-    if name in (
-        "c0ms0x2Fcm", "cond0ms0x2Fcm", "c0mS0x2Fcm", "cond0mS0x2Fcm",
-        "cond_ms_cm", "conductivity_ms_cm", "cond_mscm", "conductivity_mscm",
-        "cond_mS_cm", "conductivity_mS_cm",
-    ):
-        return "CNDC", data / 10.0, ""       # mS/cm → S/m
-    if name in (
-        "c0us0x2Fcm", "cond0us0x2Fcm", "c0uS0x2Fcm", "cond0uS0x2Fcm",
-        "cond_us_cm", "conductivity_us_cm", "cond_uS_cm", "conductivity_uS_cm",
-        "cond_uscm", "conductivity_uscm", "cond_uScm", "conductivity_uScm",
-    ):
-        return "CNDC", data / 10000.0, ""    # µS/cm → S/m
+    raw = name
+    n = (
+        name.strip()
+        .lower()
+        .replace("0x2f", "/")
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("_", "")
+    )
+
+    is_cond = ("cond" in n) or ("conductivity" in n) or ("cndc" in n)
+
+    if is_cond:
+        if "ms/cm" in n:
+            return "CNDC", data / 10.0, ""       # mS/cm → S/m
+        if ("us/cm" in n) or ("µs/cm" in raw.lower()) or ("μs/cm" in raw.lower()):
+            return "CNDC", data / 10000.0, ""    # µS/cm → S/m
+        return "CNDC", data, ""                  # assume already S/m
 
     # ---- Salinity ---------------------------------------------------------
     if name == "sal00":
