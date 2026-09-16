@@ -440,6 +440,13 @@ def _prepare_dataset_for_write(
         if variable_name in prepared.variables:
             prepared[variable_name] = prepared[variable_name].astype(np.int8)
             encoding[variable_name] = {"dtype": "int8"}
+    
+    # CRITICAL FIX: Remove 'coordinates' from variable attributes to avoid xarray encoding conflict
+    # The 'coordinates' attribute is handled by xarray's dimension coordinates system, not variable attrs
+    for var_name in prepared.data_vars:
+        if "coordinates" in prepared[var_name].attrs:
+            del prepared[var_name].attrs["coordinates"]
+    
     return prepared, encoding
 
 
