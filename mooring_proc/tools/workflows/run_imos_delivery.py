@@ -172,8 +172,8 @@ def _sanitise_delivery_dataset(dataset: xr.Dataset, schema_dir: str | None = Non
     # In the future, this could enforce a strict whitelist
     
     source_file_value = cleaned.attrs.get("source_file", "")
-    if isinstance(source_file_value, str) and source_file_value:
-        cleaned.attrs["source_file"] = Path(source_file_value).name
+    if not _is_blank(source_file_value):
+        cleaned.attrs["source_file"] = Path(str(source_file_value)).name
     
     return cleaned
 
@@ -192,8 +192,8 @@ def _delivery_metadata(row, cfg, version: str, dataset: xr.Dataset, schema_dir: 
     
     # Normalize source_file to just the filename (not full path)
     source_file_value = attrs.get("source_file", "")
-    if isinstance(source_file_value, str) and source_file_value:
-        attrs["source_file"] = Path(source_file_value).name
+    if not _is_blank(source_file_value):
+        attrs["source_file"] = Path(str(source_file_value)).name
 
     depth_value = attrs.get("NOMINAL_DEPTH", row.get("nominal_depth", cfg.get("nominal_depth", 0)))
     if "NOMINAL_DEPTH" in dataset.variables:

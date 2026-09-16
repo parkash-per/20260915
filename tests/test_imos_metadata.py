@@ -9,7 +9,7 @@ import xarray as xr
 from mooring_proc.tools.imos.attributes import apply_imos_mandatory_attributes
 from mooring_proc.tools.imos.publisher import publish_delivery
 from mooring_proc.tools.imos.writer import build_output_filename, write_imos_file
-from mooring_proc.tools.workflows.run_imos_delivery import _delivery_metadata
+from mooring_proc.tools.workflows.run_imos_delivery import _delivery_metadata, _sanitise_delivery_dataset
 
 
 def _sample_dataset() -> xr.Dataset:
@@ -181,6 +181,14 @@ class ImosMetadataTests(unittest.TestCase):
 
         self.assertEqual(metadata["inst_channels"], "TCS")
         self.assertEqual(metadata["mooring_channels"], "TCS")
+
+    def test_sanitise_delivery_dataset_normalizes_pathlike_source_file(self):
+        dataset = _sample_dataset()
+        dataset.attrs["source_file"] = Path("/full/path/input_file.cnv")
+
+        sanitized = _sanitise_delivery_dataset(dataset)
+
+        self.assertEqual(sanitized.attrs["source_file"], "input_file.cnv")
 
 
 if __name__ == "__main__":
