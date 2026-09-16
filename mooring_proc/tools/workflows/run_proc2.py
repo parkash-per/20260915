@@ -73,75 +73,48 @@ def _load_proc1_file(row) -> xr.Dataset:
         return opened_dataset.load()
 
 
-def _reconstruct_missing_qc_variables(
+def _reset_qc_variables_to_good(
     dataset: xr.Dataset,
-    instrument: str,
-    schema_dir: str | None = None,
     default_flag: int = 1,
 ) -> xr.Dataset:
-    """Reconstruct missing *_quality_control variables in a dataset.
+    """Reset all QC variables to the default flag value (good data).
     
-    For each variable in the dataset, if the corresponding *_quality_control
-    variable is missing, create it with the given default flag value.
+    For each *_quality_control variable in the dataset, set all values
+    to the default flag (typically 1 = good data). This prepares the
+    dataset for proc_2, where manual QC flags will override as needed.
     
     Parameters
     ----------
     dataset : xr.Dataset
-        The dataset to augment (typically a loaded proc_1 FV00 file)
-    instrument : str
-        Instrument type (e.g. "SBE37") to look up schema
-    schema_dir : str, optional
-        Path to schemas directory; defaults to tools/schemas
+        The dataset with QC variables
     default_flag : int, default 1
-        Default QC flag value to use when creating new QC variables.
-        1 = Good_data in IMOS convention.
+        Default QC flag value. 1 = Good_data in IMOS convention.
     
     Returns
     -------
     xr.Dataset
-        New dataset with missing QC variables added.
+        Dataset with QC variables reset to default flag.
     """
-    schema = load_instrument_schema(instrument, schema_dir=schema_dir)
-    output_vars = schema.get("output_variables", {}) or {}
+    result = dataset.copy(deep=False)
     
-    result = dataset.copy(deep=True)
-    
-    for var_name, var_meta in output_vars.items():
-        if not var_name.endswith("_quality_control") or not isinstance(var_meta, dict):
+    for var_name in result.data_vars:
+        if not var_name.endswith("_quality_control"):
             continue
         
-        if var_name in result.variables:
-            continue
-        
-        # Extract the base variable name (e.g. TEMP from TEMP_quality_control)
-        base_var_name = var_name.removesuffix("_quality_control")
-        
-        # Only create QC variable if the base variable exists
-        if base_var_name not in result.variables:
-            continue
-        
-        # Get dimensions from the base variable
-        base_var = result[base_var_name]
-        dims = list(base_var.dims)
-        
-        # Create the QC variable filled with the default flag value
-        qc_data = np.full(base_var.shape, fill_value=default_flag, dtype=np.int8)
-        result[var_name] = xr.DataArray(qc_data, dims=dims)
-        
-        # Apply schema attributes if available
-        if "attributes" in var_meta and isinstance(var_meta["attributes"], dict):
-            result[var_name].attrs.update(var_meta["attributes"])
+        qc_var = result[var_name]
+        # Fill all QC values with default flag
+        qc_data = np.full_like(qc_var.values, fill_value=default_flag, dtype=np.int8)
+        result[var_name] = xr.DataArray(qc_data, dims=qc_var.dims, attrs=qc_var.attrs)
     
     return result
 
 
-def run_proc2(config, instrument_id=None, schema_dir=None):
-    """Run proc_2 workflow to produce final IMOS FV01 product with QC variables.
+def run_proc2(config, instrument_id=None, input_dataset=None):
+    """Run proc_2 workflow to produce final IMOS FV01 product with manual QC.
     
-    proc_2 loads the proc_1 FV00 file from disk, reconstructs any missing
-    *_quality_control variables, applies manual QC flags, and writes the final
-    IMOS FV01 output with schema-driven attributes. This is the only product
-    that will be compliance-checked and published as a deliverable.
+    proc_2 loads the proc_1 FV00 file from disk, resets QC variables to
+    good data (flag=1), applies manual QC flags, and writes the final
+    IMOS FV01 output with schema-driven attributes.
     
     Parameters
     ----------
@@ -149,8 +122,8 @@ def run_proc2(config, instrument_id=None, schema_dir=None):
         Configuration dict including manual_qc_flags or flag_windows
     instrument_id : str, optional
         Instrument deployment ID; resolved from config if not provided
-    schema_dir : str, optional
-        Path to schemas directory; resolved from config if not provided
+    input_dataset : str or Path, optional
+        Explicit path to proc_1 file; if not provided, resolves from metadata
     """
     metadata_source = _metadata_source(config)
     inst_deploy_id = _instrument_key(config, instrument_id)
@@ -160,22 +133,26 @@ def run_proc2(config, instrument_id=None, schema_dir=None):
         deployment_id=config.get("deployment_id"),
     )
     inst_type = _instrument_type(row)
-    schema_dir = schema_dir or config.get("schema_dir")
+    schema_dir = config.get("schema_dir")
 
-    # Load proc_1 FV00 file from disk
-    proc_1_dataset = _load_proc1_file(row)
+    # Load proc_1 FV00 file
+    if input_dataset is not None:
+        candidate = Path(str(input_dataset)).expanduser()
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+        if candidate.exists():
+            proc_1_dataset = xr.open_dataset(candidate).load()
+        else:
+            raise FileNotFoundError(f"Input dataset not found: {candidate}")
+    else:
+        proc_1_dataset = _load_proc1_file(row)
     
-    # Reconstruct any missing QC variables from schema
-    proc_1_with_qc = _reconstruct_missing_qc_variables(
-        proc_1_dataset,
-        inst_type,
-        schema_dir=schema_dir,
-        default_flag=1,
-    )
+    # Reset all QC variables to good data (flag=1) as baseline
+    proc_1_with_reset_qc = _reset_qc_variables_to_good(proc_1_dataset, default_flag=1)
     
-    # Apply manual QC flags
+    # Apply manual QC flags (these will override the good-data defaults)
     manual_qc_flags = list(config.get("manual_qc_flags", config.get("flag_windows", [])) or [])
-    proc_2_dataset = apply_qc_flag_windows(proc_1_with_qc, manual_qc_flags)
+    proc_2_dataset = apply_qc_flag_windows(proc_1_with_reset_qc, manual_qc_flags)
 
     stage_metadata = {**cfg, **row.to_dict(), **config, **proc_2_dataset.attrs}
     stage_metadata.update(
