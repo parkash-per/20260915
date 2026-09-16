@@ -8,9 +8,19 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import xarray as xr
 
 from ..config_manager import load_global_attributes
+
+
+def _is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float) and np.isnan(value):
+        return True
+    text = str(value).strip()
+    return text == "" or text.lower() in {"nan", "none"}
 
 
 def load_imos_mandatory_attributes(schema_dir: str | None = None) -> dict[str, str]:
@@ -55,6 +65,65 @@ def load_imos_default_attributes(schema_dir: str | None = None) -> dict[str, str
     return dict(defaults)
 
 
+def _dataset_scalar(dataset: xr.Dataset, variable_name: str) -> Any:
+    if variable_name not in dataset.variables:
+        return None
+    value = np.asarray(dataset[variable_name].values).squeeze()
+    if np.size(value) != 1:
+        return None
+    return value.item()
+
+
+def load_imos_geospatial_attributes(
+    dataset: xr.Dataset,
+    *,
+    overrides: dict[str, Any] | None = None,
+    schema_dir: str | None = None,
+) -> dict[str, Any]:
+    """Load IMOS geospatial global attributes with dataset-derived values."""
+    global_schema = load_global_attributes(schema_dir=schema_dir)
+    geospatial = dict(global_schema.get("geospatial", {}) or {})
+    aliases = {
+        "positive": "geospatial_vertical_positive",
+        "lat_max": "geospatial_lat_max",
+        "lat_min": "geospatial_lat_min",
+        "lon_max": "geospatial_lon_max",
+        "lon_min": "geospatial_lon_min",
+        "vertical_max": "geospatial_vertical_max",
+        "vertical_min": "geospatial_vertical_min",
+    }
+    override_values = dict(overrides or {})
+    latitude = override_values.get("latitude", dataset.attrs.get("latitude", _dataset_scalar(dataset, "LATITUDE")))
+    longitude = override_values.get("longitude", dataset.attrs.get("longitude", _dataset_scalar(dataset, "LONGITUDE")))
+    depth = None
+    for value in (
+        override_values.get("depth"),
+        override_values.get("nominal_depth"),
+        dataset.attrs.get("depth"),
+        dataset.attrs.get("nominal_depth"),
+        _dataset_scalar(dataset, "NOMINAL_DEPTH"),
+    ):
+        if not _is_blank(value):
+            depth = value
+            break
+    derived_values = {
+        "geospatial_lat_max": latitude,
+        "geospatial_lat_min": latitude,
+        "geospatial_lon_max": longitude,
+        "geospatial_lon_min": longitude,
+        "geospatial_vertical_max": depth,
+        "geospatial_vertical_min": depth,
+    }
+
+    resolved = {}
+    for key, value in geospatial.items():
+        attr_key = aliases.get(key, key)
+        resolved_value = derived_values.get(attr_key) if value is None else value
+        if not _is_blank(resolved_value):
+            resolved[attr_key] = resolved_value
+    return resolved
+
+
 def apply_imos_mandatory_attributes(
     dataset: xr.Dataset,
     *,
@@ -96,8 +165,10 @@ def apply_imos_mandatory_attributes(
     """
     prepared = dataset.copy(deep=True)
     
-    # Start with mandatory attributes from schema
+    # Start with schema-driven attributes from schema
     new_attrs = load_imos_mandatory_attributes(schema_dir=schema_dir)
+    new_attrs.update(load_imos_default_attributes(schema_dir=schema_dir))
+    new_attrs.update(load_imos_geospatial_attributes(prepared, overrides=overrides, schema_dir=schema_dir))
     
     # Merge in dataset's existing attributes (preserve non-mandatory values)
     existing = dict(prepared.attrs)
